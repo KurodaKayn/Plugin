@@ -1,0 +1,8 @@
+{
+  "name": "sample",
+  "version": "1.0.0",
+  "entry": "./sample-plugin",
+  "enabled": true,
+  "timeout_ms": 3000
+}
+

@@ -1,0 +1,4 @@
+bin/
+plugins/*/*
+!plugins/*/plugin.json
+
