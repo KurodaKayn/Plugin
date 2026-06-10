@@ -32,6 +32,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "list":
 		return runList(args[1:], stdout)
+	case "reload":
+		return runReload(args[1:], stdout)
+	case "unload":
+		return runUnload(args[1:], stdout)
 	case "run":
 		return runPlugins(args[1:], stdout)
 	case "help", "-h", "--help":
@@ -54,6 +58,48 @@ func runList(args []string, stdout io.Writer) error {
 	pluginManager, err := manager.Load(*pluginDir, config.DefaultTimeout)
 	if err != nil {
 		return err
+	}
+
+	return writeJSON(stdout, pluginManager.Plugins())
+}
+
+func runReload(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("reload", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	pluginDir := flags.String("plugins", config.DefaultPluginDir, "plugin directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	pluginManager, err := manager.Load(*pluginDir, config.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	if err := pluginManager.Reload(); err != nil {
+		return err
+	}
+
+	return writeJSON(stdout, pluginManager.Plugins())
+}
+
+func runUnload(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("unload", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	pluginDir := flags.String("plugins", config.DefaultPluginDir, "plugin directory")
+	name := flags.String("name", "", "plugin name")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" {
+		return errors.New("missing plugin name: use --name")
+	}
+
+	pluginManager, err := manager.Load(*pluginDir, config.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	if !pluginManager.Unload(*name) {
+		return fmt.Errorf("plugin %q is not loaded", *name)
 	}
 
 	return writeJSON(stdout, pluginManager.Plugins())
@@ -144,6 +190,8 @@ func writeJSON(stdout io.Writer, value any) error {
 func writeUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "usage:")
 	_, _ = fmt.Fprintln(w, "  executor list [--plugins plugins]")
+	_, _ = fmt.Fprintln(w, "  executor reload [--plugins plugins]")
+	_, _ = fmt.Fprintln(w, "  executor unload [--plugins plugins] --name sample")
 	_, _ = fmt.Fprintln(w, "  executor run [--plugins plugins] --input '{\"message\":\"hello\"}'")
 	_, _ = fmt.Fprintln(w, "  executor run [--plugins plugins] --file input.json")
 }

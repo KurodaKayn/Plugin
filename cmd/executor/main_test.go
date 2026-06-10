@@ -62,3 +62,57 @@ func TestRunWithMissingPluginDirectoryReturnsEmptySummary(t *testing.T) {
 		t.Fatalf("expected no results, got %#v", summary.Results)
 	}
 }
+
+func TestReloadWithMissingPluginDirectoryReturnsEmptyList(t *testing.T) {
+	var stdout bytes.Buffer
+
+	err := run([]string{
+		"reload",
+		"--plugins", filepath.Join(t.TempDir(), "missing"),
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("reload returned error: %v", err)
+	}
+
+	var plugins []any
+	if err := json.Unmarshal(stdout.Bytes(), &plugins); err != nil {
+		t.Fatalf("parse plugins JSON: %v", err)
+	}
+	if len(plugins) != 0 {
+		t.Fatalf("expected no plugins, got %#v", plugins)
+	}
+}
+
+func TestUnloadRemovesLoadedPlugin(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	pluginPath := filepath.Join(pluginDir, "disabled")
+	if err := os.MkdirAll(pluginPath, 0700); err != nil {
+		t.Fatalf("create plugin dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginPath, "plugin.json"), []byte(`{
+		"name": "disabled",
+		"version": "1.0.0",
+		"entry": "./missing",
+		"enabled": false
+	}`), 0600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err := run([]string{
+		"unload",
+		"--plugins", pluginDir,
+		"--name", "disabled",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unload returned error: %v", err)
+	}
+
+	var plugins []any
+	if err := json.Unmarshal(stdout.Bytes(), &plugins); err != nil {
+		t.Fatalf("parse plugins JSON: %v", err)
+	}
+	if len(plugins) != 0 {
+		t.Fatalf("expected no plugins after unload, got %#v", plugins)
+	}
+}
