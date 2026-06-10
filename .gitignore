@@ -2,3 +2,5 @@ bin/
 plugins/*/*
 !plugins/*/plugin.json
 !plugins/*/*.py
+
+.DS_Store
