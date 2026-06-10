@@ -33,4 +33,3 @@ type ExecutionSummary struct {
 	RequestID string         `json:"request_id"`
 	Results   []PluginResult `json:"results"`
 }
-

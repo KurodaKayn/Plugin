@@ -116,6 +116,7 @@ func readInput(input, filePath string) (map[string]any, error) {
 	var raw []byte
 	var err error
 	if filePath != "" {
+		// #nosec G304 -- The CLI intentionally reads the input file path supplied by the user.
 		raw, err = os.ReadFile(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("read input file: %w", err)
@@ -141,8 +142,8 @@ func writeJSON(stdout io.Writer, value any) error {
 }
 
 func writeUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage:")
-	fmt.Fprintln(w, "  executor list [--plugins plugins]")
-	fmt.Fprintln(w, "  executor run [--plugins plugins] --input '{\"message\":\"hello\"}'")
-	fmt.Fprintln(w, "  executor run [--plugins plugins] --file input.json")
+	_, _ = fmt.Fprintln(w, "usage:")
+	_, _ = fmt.Fprintln(w, "  executor list [--plugins plugins]")
+	_, _ = fmt.Fprintln(w, "  executor run [--plugins plugins] --input '{\"message\":\"hello\"}'")
+	_, _ = fmt.Fprintln(w, "  executor run [--plugins plugins] --file input.json")
 }

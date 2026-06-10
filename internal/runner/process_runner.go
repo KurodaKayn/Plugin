@@ -38,6 +38,7 @@ func (r ProcessRunner) Run(ctx context.Context, plugin manager.Plugin, request c
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// #nosec G204 -- The plugin entry path comes from a validated manifest and is the execution model.
 	cmd := exec.CommandContext(runCtx, plugin.EntryPath)
 	cmd.Dir = plugin.Dir
 	cmd.Stdin = bytes.NewReader(payload)

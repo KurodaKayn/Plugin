@@ -105,10 +105,10 @@ func writeManifest(t *testing.T, root, name, body string) {
 	t.Helper()
 
 	dir := filepath.Join(root, name)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("create plugin dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(body), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(body), 0600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 }
@@ -119,10 +119,14 @@ func writeExecutable(t *testing.T, path, body string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script plugin tests are not supported on Windows")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatalf("create executable dir: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0755); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatalf("write executable: %v", err)
+	}
+	// #nosec G302 -- Test plugin scripts must be executable so the loader can validate them.
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatalf("make executable: %v", err)
 	}
 }

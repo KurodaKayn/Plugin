@@ -41,7 +41,9 @@ func loadOne(rootDir, dirName string, defaultTimeout time.Duration, seenNames ma
 		Status:  contract.StatusInvalid,
 	}
 
-	raw, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json"))
+	manifestPath := filepath.Join(pluginDir, "plugin.json")
+	// #nosec G304 -- Plugin manifests are intentionally loaded from the configured plugin directory.
+	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		plugin.Error = fmt.Sprintf("read plugin.json: %v", err)
 		return plugin

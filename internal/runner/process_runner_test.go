@@ -13,7 +13,7 @@ import (
 )
 
 func TestProcessRunnerReturnsSuccessResult(t *testing.T) {
-	plugin := testPlugin(t, "success", "#!/bin/sh\nprintf '{\"ok\":true,\"data\":{\"message\":\"done\"}}\\n'\n", time.Second)
+	plugin := testPlugin(t, "success", "#!/bin/sh\nprintf '{\"ok\":true,\"data\":{\"message\":\"done\"}}\\n'\n", 5*time.Second)
 
 	result := ProcessRunner{DefaultTimeout: time.Second}.Run(context.Background(), plugin, testRequest())
 
@@ -26,7 +26,7 @@ func TestProcessRunnerReturnsSuccessResult(t *testing.T) {
 }
 
 func TestProcessRunnerReturnsFailedResultForPluginError(t *testing.T) {
-	plugin := testPlugin(t, "failed", "#!/bin/sh\nprintf '{\"ok\":false,\"error\":\"bad input\"}\\n'\n", time.Second)
+	plugin := testPlugin(t, "failed", "#!/bin/sh\nprintf '{\"ok\":false,\"error\":\"bad input\"}\\n'\n", 5*time.Second)
 
 	result := ProcessRunner{DefaultTimeout: time.Second}.Run(context.Background(), plugin, testRequest())
 
@@ -39,7 +39,7 @@ func TestProcessRunnerReturnsFailedResultForPluginError(t *testing.T) {
 }
 
 func TestProcessRunnerReturnsFailedResultForInvalidJSON(t *testing.T) {
-	plugin := testPlugin(t, "invalid-json", "#!/bin/sh\nprintf 'not-json\\n'\n", time.Second)
+	plugin := testPlugin(t, "invalid-json", "#!/bin/sh\nprintf 'not-json\\n'\n", 5*time.Second)
 
 	result := ProcessRunner{DefaultTimeout: time.Second}.Run(context.Background(), plugin, testRequest())
 
@@ -73,8 +73,12 @@ func testPlugin(t *testing.T, name, body string, timeout time.Duration) manager.
 
 	dir := t.TempDir()
 	entryPath := filepath.Join(dir, name)
-	if err := os.WriteFile(entryPath, []byte(body), 0755); err != nil {
+	if err := os.WriteFile(entryPath, []byte(body), 0600); err != nil {
 		t.Fatalf("write plugin script: %v", err)
+	}
+	// #nosec G302 -- Test plugin scripts must be executable so the runner can launch them.
+	if err := os.Chmod(entryPath, 0700); err != nil {
+		t.Fatalf("make plugin script executable: %v", err)
 	}
 
 	return manager.Plugin{

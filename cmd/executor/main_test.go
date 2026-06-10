@@ -21,7 +21,7 @@ func TestReadInputFromInlineJSON(t *testing.T) {
 
 func TestReadInputFromFile(t *testing.T) {
 	inputPath := filepath.Join(t.TempDir(), "input.json")
-	if err := os.WriteFile(inputPath, []byte(`{"message":"from-file"}`), 0644); err != nil {
+	if err := os.WriteFile(inputPath, []byte(`{"message":"from-file"}`), 0600); err != nil {
 		t.Fatalf("write input file: %v", err)
 	}
 
