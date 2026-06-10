@@ -113,7 +113,11 @@ func resolveEntryPath(pluginDir, entry string) (string, error) {
 		return "", errors.New("manifest entry must stay inside plugin directory")
 	}
 
-	return filepath.Join(pluginDir, cleaned), nil
+	entryPath, err := filepath.Abs(filepath.Join(pluginDir, cleaned))
+	if err != nil {
+		return "", fmt.Errorf("resolve plugin entry: %w", err)
+	}
+	return entryPath, nil
 }
 
 func validateExecutable(entryPath string) error {
