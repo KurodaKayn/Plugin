@@ -14,12 +14,13 @@ import (
 )
 
 type Manifest struct {
-	Name         string       `json:"name"`
-	Version      string       `json:"version"`
-	Entry        string       `json:"entry"`
-	Enabled      bool         `json:"enabled"`
-	TimeoutMS    int          `json:"timeout_ms,omitempty"`
-	Dependencies []Dependency `json:"dependencies,omitempty"`
+	Name          string        `json:"name"`
+	Version       string        `json:"version"`
+	Entry         string        `json:"entry"`
+	Enabled       bool          `json:"enabled"`
+	TimeoutMS     int           `json:"timeout_ms,omitempty"`
+	Dependencies  []Dependency  `json:"dependencies,omitempty"`
+	FailurePolicy FailurePolicy `json:"failure_policy,omitzero"`
 }
 
 type Dependency struct {
@@ -27,16 +28,21 @@ type Dependency struct {
 	Version string `json:"version,omitempty"`
 }
 
+type FailurePolicy struct {
+	FallbackData map[string]any `json:"fallback_data,omitempty"`
+}
+
 type Plugin struct {
-	Name         string        `json:"name"`
-	Version      string        `json:"version"`
-	Dir          string        `json:"-"`
-	EntryPath    string        `json:"-"`
-	Enabled      bool          `json:"enabled"`
-	Timeout      time.Duration `json:"-"`
-	Dependencies []Dependency  `json:"dependencies,omitempty"`
-	Status       string        `json:"status"`
-	Error        string        `json:"error,omitempty"`
+	Name          string        `json:"name"`
+	Version       string        `json:"version"`
+	Dir           string        `json:"-"`
+	EntryPath     string        `json:"-"`
+	Enabled       bool          `json:"enabled"`
+	Timeout       time.Duration `json:"-"`
+	Dependencies  []Dependency  `json:"dependencies,omitempty"`
+	FailurePolicy FailurePolicy `json:"failure_policy,omitzero"`
+	Status        string        `json:"status"`
+	Error         string        `json:"error,omitempty"`
 }
 
 func loadOne(rootDir, dirName string, defaultTimeout time.Duration, seenNames map[string]struct{}) Plugin {
@@ -74,6 +80,7 @@ func loadOne(rootDir, dirName string, defaultTimeout time.Duration, seenNames ma
 	plugin.Version = manifest.Version
 	plugin.Enabled = manifest.Enabled
 	plugin.Dependencies = manifest.Dependencies
+	plugin.FailurePolicy = manifest.FailurePolicy
 
 	if manifest.Name == "" {
 		plugin.Name = dirName

@@ -64,6 +64,27 @@ func TestProcessRunnerReturnsTimeoutResult(t *testing.T) {
 	}
 }
 
+func TestProcessRunnerAppliesFallbackData(t *testing.T) {
+	plugin := testPlugin(t, "degraded", "#!/bin/sh\nprintf '{\"ok\":false,\"error\":\"primary unavailable\"}\\n'\n", 5*time.Second)
+	plugin.FailurePolicy = manager.FailurePolicy{
+		FallbackData: map[string]any{
+			"message": "fallback",
+		},
+	}
+
+	result := ProcessRunner{DefaultTimeout: time.Second}.Run(context.Background(), plugin, testRequest())
+
+	if result.Status != contract.StatusDegraded {
+		t.Fatalf("expected degraded, got %#v", result)
+	}
+	if result.Error != "primary unavailable" {
+		t.Fatalf("expected original error, got %q", result.Error)
+	}
+	if result.Data["message"] != "fallback" {
+		t.Fatalf("expected fallback data, got %#v", result.Data)
+	}
+}
+
 func testPlugin(t *testing.T, name, body string, timeout time.Duration) manager.Plugin {
 	t.Helper()
 

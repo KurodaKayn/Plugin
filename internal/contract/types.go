@@ -7,6 +7,7 @@ const (
 	StatusSuccess  = "success"
 	StatusFailed   = "failed"
 	StatusTimeout  = "timeout"
+	StatusDegraded = "degraded"
 )
 
 type PluginRequest struct {

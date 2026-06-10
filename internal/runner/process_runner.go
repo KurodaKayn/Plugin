@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os/exec"
 	"strings"
 	"time"
@@ -50,33 +51,28 @@ func (r ProcessRunner) Run(ctx context.Context, plugin manager.Plugin, request c
 
 	if err := cmd.Run(); err != nil {
 		if runCtx.Err() == context.DeadlineExceeded {
-			result.Status = contract.StatusTimeout
-			result.Error = fmt.Sprintf("plugin timed out after %s", timeout)
-			return result
+			return applyFailurePolicy(plugin, result, contract.StatusTimeout, fmt.Sprintf("plugin timed out after %s", timeout))
 		}
 
-		result.Error = joinError("plugin execution failed", err.Error(), stderr.String())
-		return result
+		return applyFailurePolicy(plugin, result, contract.StatusFailed, joinError("plugin execution failed", err.Error(), stderr.String()))
 	}
 
 	output := bytes.TrimSpace(stdout.Bytes())
 	if len(output) == 0 {
-		result.Error = "plugin produced empty output"
-		return result
+		return applyFailurePolicy(plugin, result, contract.StatusFailed, "plugin produced empty output")
 	}
 
 	var response contract.PluginResponse
 	if err := json.Unmarshal(output, &response); err != nil {
-		result.Error = fmt.Sprintf("invalid plugin output: %v", err)
-		return result
+		return applyFailurePolicy(plugin, result, contract.StatusFailed, fmt.Sprintf("invalid plugin output: %v", err))
 	}
 
 	if !response.OK {
-		result.Error = strings.TrimSpace(response.Error)
-		if result.Error == "" {
-			result.Error = "plugin returned ok=false"
+		errorMessage := strings.TrimSpace(response.Error)
+		if errorMessage == "" {
+			errorMessage = "plugin returned ok=false"
 		}
-		return result
+		return applyFailurePolicy(plugin, result, contract.StatusFailed, errorMessage)
 	}
 
 	result.Status = contract.StatusSuccess
@@ -93,4 +89,20 @@ func joinError(prefix, errText, stderrText string) string {
 		parts = append(parts, "stderr: "+strings.TrimSpace(stderrText))
 	}
 	return strings.Join(parts, ": ")
+}
+
+func applyFailurePolicy(plugin manager.Plugin, result contract.PluginResult, status string, errorMessage string) contract.PluginResult {
+	result.Status = status
+	result.Error = errorMessage
+	if plugin.FailurePolicy.FallbackData == nil {
+		return result
+	}
+
+	result.Status = contract.StatusDegraded
+	result.Data = cloneMap(plugin.FailurePolicy.FallbackData)
+	return result
+}
+
+func cloneMap(values map[string]any) map[string]any {
+	return maps.Clone(values)
 }
