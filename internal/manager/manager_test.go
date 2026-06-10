@@ -101,6 +101,43 @@ func TestLoadRejectsUnsafeManifestEntry(t *testing.T) {
 	}
 }
 
+func TestManagerReloadsAndUnloadsPlugins(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	pluginManager, err := Load(pluginDir, time.Second)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(pluginManager.Plugins()) != 0 {
+		t.Fatalf("expected no plugins before reload, got %d", len(pluginManager.Plugins()))
+	}
+
+	writeExecutable(t, filepath.Join(pluginDir, "hot", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "hot", `{
+		"name": "hot",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true
+	}`)
+
+	if err := pluginManager.Reload(); err != nil {
+		t.Fatalf("Reload returned error: %v", err)
+	}
+	plugins := pluginManager.Plugins()
+	if len(plugins) != 1 || plugins[0].Name != "hot" {
+		t.Fatalf("expected hot plugin after reload, got %#v", plugins)
+	}
+
+	if !pluginManager.Unload("hot") {
+		t.Fatal("expected hot plugin to unload")
+	}
+	if len(pluginManager.Plugins()) != 0 {
+		t.Fatalf("expected no plugins after unload, got %#v", pluginManager.Plugins())
+	}
+	if pluginManager.Unload("missing") {
+		t.Fatal("expected missing plugin unload to return false")
+	}
+}
+
 func writeManifest(t *testing.T, root, name, body string) {
 	t.Helper()
 

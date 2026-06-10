@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"plugin-executor/internal/contract"
 )
 
 type Manager struct {
-	plugins []Plugin
+	pluginDir      string
+	defaultTimeout time.Duration
+	plugins        []Plugin
 }
 
 func Load(pluginDir string, defaultTimeout time.Duration) (*Manager, error) {
@@ -19,9 +22,42 @@ func Load(pluginDir string, defaultTimeout time.Duration) (*Manager, error) {
 		return nil, errors.New("default timeout must be positive")
 	}
 
+	plugins, err := scan(pluginDir, defaultTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Manager{
+		pluginDir:      pluginDir,
+		defaultTimeout: defaultTimeout,
+		plugins:        plugins,
+	}, nil
+}
+
+func (m *Manager) Reload() error {
+	plugins, err := scan(m.pluginDir, m.defaultTimeout)
+	if err != nil {
+		return err
+	}
+	m.plugins = plugins
+	return nil
+}
+
+func (m *Manager) Unload(name string) bool {
+	name = strings.TrimSpace(name)
+	for i, plugin := range m.plugins {
+		if plugin.Name == name {
+			m.plugins = append(m.plugins[:i], m.plugins[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func scan(pluginDir string, defaultTimeout time.Duration) ([]Plugin, error) {
 	entries, err := os.ReadDir(pluginDir)
 	if errors.Is(err, os.ErrNotExist) {
-		return &Manager{}, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read plugin directory: %w", err)
@@ -46,7 +82,7 @@ func Load(pluginDir string, defaultTimeout time.Duration) (*Manager, error) {
 		plugins = append(plugins, plugin)
 	}
 
-	return &Manager{plugins: plugins}, nil
+	return plugins, nil
 }
 
 func (m *Manager) Plugins() []Plugin {
