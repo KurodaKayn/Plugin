@@ -1,4 +1,4 @@
-# 插件化执行系统设计文档
+# 插件化执行系统设计与使用说明
 
 ## 1. 目标说明
 
@@ -63,15 +63,17 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 
 ## 4. 总体架构
 
-计划目录结构：
+当前目录结构：
 
 ```text
 .
+├── .gitignore
 ├── README.md
 ├── go.mod
 ├── cmd/
 │   ├── executor/
-│   │   └── main.go
+│   │   ├── main.go
+│   │   └── main_test.go
 │   └── sample-plugin/
 │       └── main.go
 ├── internal/
@@ -80,9 +82,12 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 │   ├── contract/
 │   │   └── types.go
 │   ├── manager/
-│   │   └── manager.go
+│   │   ├── manager.go
+│   │   ├── manager_test.go
+│   │   └── manifest.go
 │   └── runner/
-│       └── process_runner.go
+│       ├── process_runner.go
+│       └── process_runner_test.go
 └── plugins/
     └── sample/
         ├── plugin.json
@@ -217,7 +222,7 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 
 主程序必须保证单个插件失败不会影响整体执行。
 
-计划处理的错误类型：
+已处理的错误类型：
 
 - 插件目录不存在：主程序正常启动，插件列表为空。
 - `plugin.json` 缺失或格式错误：该插件标记为 `invalid`。
@@ -227,14 +232,37 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 - 插件超时：终止插件进程，记录 `timeout`。
 - 插件返回 `ok=false`：视为插件业务失败，但主程序继续运行。
 
-## 9. 命令行交互设计
+## 9. 实际运行命令
 
-计划提供以下命令：
+先构建示例插件。生成的二进制会放到 `plugins/sample/sample-plugin`，该文件已被 `.gitignore` 忽略，不提交到仓库。
+
+```bash
+go build -o plugins/sample/sample-plugin ./cmd/sample-plugin
+```
+
+查看插件列表：
 
 ```bash
 go run ./cmd/executor list
+```
+
+从命令行传入 JSON 并执行所有启用插件：
+
+```bash
 go run ./cmd/executor run --input '{"message":"hello","value":123}'
+```
+
+从文件读取 JSON 并执行所有启用插件：
+
+```bash
 go run ./cmd/executor run --file input.json
+```
+
+指定插件目录：
+
+```bash
+go run ./cmd/executor list --plugins plugins
+go run ./cmd/executor run --plugins plugins --input '{"message":"hello"}'
 ```
 
 命令说明：
@@ -271,9 +299,15 @@ go run ./cmd/executor run --file input.json
 
 示例插件只用于验证协议和执行链路，不把业务逻辑写进主程序。
 
-## 11. 验证计划
+## 11. 验证方式
 
-第一版实现完成后，需要验证：
+运行单元测试和集成边界测试：
+
+```bash
+go test ./...
+```
+
+已覆盖：
 
 - `go test ./...` 能通过。
 - 插件目录为空时，主程序能正常运行。
@@ -286,7 +320,7 @@ go run ./cmd/executor run --file input.json
 
 ## 12. 实现顺序
 
-按以下顺序实现，保证每一步都可验证：
+已按以下顺序实现并提交，保证每一步都可验证：
 
 1. 初始化 Go 模块。
 2. 定义 `contract` 数据结构。
@@ -297,3 +331,14 @@ go run ./cmd/executor run --file input.json
 7. 添加示例插件。
 8. 添加针对加载、执行、错误和超时的测试。
 9. 更新 README 中的实际运行命令和已知限制。
+
+## 13. 已知限制
+
+当前版本聚焦题目必选能力，暂不包含以下内容：
+
+- 不支持常驻插件进程池。每次执行都会启动一次插件进程。
+- 不支持插件热加载守护进程。修改 `plugins/` 后需要重新执行命令。
+- 不支持插件之间的依赖编排或流水线传递。当前每个启用插件都收到同一份输入。
+- 不支持插件权限沙箱。插件以本机可执行文件方式运行，安全性依赖本地执行环境。
+- 不提交插件二进制产物。运行示例前需要先执行 `go build -o plugins/sample/sample-plugin ./cmd/sample-plugin`。
+- 测试中的临时插件脚本使用 shell，Windows 环境下相关测试会跳过。
