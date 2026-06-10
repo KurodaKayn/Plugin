@@ -1,4 +1,4 @@
 bin/
 plugins/*/*
 !plugins/*/plugin.json
-
+!plugins/*/*.py
