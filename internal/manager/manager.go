@@ -82,6 +82,7 @@ func scan(pluginDir string, defaultTimeout time.Duration) ([]Plugin, error) {
 		plugins = append(plugins, plugin)
 	}
 
+	validateDependencies(plugins)
 	return plugins, nil
 }
 
@@ -92,11 +93,28 @@ func (m *Manager) Plugins() []Plugin {
 }
 
 func (m *Manager) EnabledPlugins() []Plugin {
-	var enabled []Plugin
-	for _, plugin := range m.plugins {
-		if plugin.Enabled && plugin.Status == contract.StatusEnabled {
-			enabled = append(enabled, plugin)
+	enabled := make([]Plugin, 0)
+	byName := pluginsByName(m.plugins)
+	visited := make(map[string]bool, len(m.plugins))
+
+	var visit func(Plugin)
+	visit = func(plugin Plugin) {
+		if visited[plugin.Name] || plugin.Status != contract.StatusEnabled {
+			return
 		}
+		visited[plugin.Name] = true
+		for _, dependency := range plugin.Dependencies {
+			target := byName[dependency.Name]
+			if target != nil {
+				visit(*target)
+			}
+		}
+		enabled = append(enabled, plugin)
 	}
+
+	for _, plugin := range m.plugins {
+		visit(plugin)
+	}
+
 	return enabled
 }

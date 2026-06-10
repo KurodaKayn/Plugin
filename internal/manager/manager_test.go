@@ -138,6 +138,123 @@ func TestManagerReloadsAndUnloadsPlugins(t *testing.T) {
 	}
 }
 
+func TestLoadValidatesDependenciesAndVersionConstraints(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	writeExecutable(t, filepath.Join(pluginDir, "base", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "base", `{
+		"name": "base",
+		"version": "1.2.0",
+		"entry": "./run",
+		"enabled": true
+	}`)
+	writeExecutable(t, filepath.Join(pluginDir, "consumer", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "consumer", `{
+		"name": "consumer",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "base", "version": ">=1.0.0"}]
+	}`)
+	writeExecutable(t, filepath.Join(pluginDir, "missing", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "missing", `{
+		"name": "missing",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "absent"}]
+	}`)
+	writeExecutable(t, filepath.Join(pluginDir, "too-new", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "too-new", `{
+		"name": "too-new",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "base", "version": ">=2.0.0"}]
+	}`)
+	writeManifest(t, pluginDir, "disabled-base", `{
+		"name": "disabled-base",
+		"version": "1.0.0",
+		"entry": "./missing",
+		"enabled": false
+	}`)
+	writeExecutable(t, filepath.Join(pluginDir, "needs-disabled", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "needs-disabled", `{
+		"name": "needs-disabled",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "disabled-base"}]
+	}`)
+
+	pluginManager, err := Load(pluginDir, time.Second)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	statuses := pluginStatuses(pluginManager.Plugins())
+	if statuses["base"] != contract.StatusEnabled {
+		t.Fatalf("expected base enabled, got %q", statuses["base"])
+	}
+	if statuses["consumer"] != contract.StatusEnabled {
+		t.Fatalf("expected consumer enabled, got %q", statuses["consumer"])
+	}
+	if statuses["missing"] != contract.StatusInvalid {
+		t.Fatalf("expected missing dependency invalid, got %q", statuses["missing"])
+	}
+	if statuses["too-new"] != contract.StatusInvalid {
+		t.Fatalf("expected unsatisfied version invalid, got %q", statuses["too-new"])
+	}
+	if statuses["needs-disabled"] != contract.StatusInvalid {
+		t.Fatalf("expected disabled dependency invalid, got %q", statuses["needs-disabled"])
+	}
+
+	enabled := pluginManager.EnabledPlugins()
+	if len(enabled) != 2 || enabled[0].Name != "base" || enabled[1].Name != "consumer" {
+		t.Fatalf("expected dependency-first enabled order, got %#v", enabled)
+	}
+}
+
+func TestLoadRejectsDependencyCycles(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	writeExecutable(t, filepath.Join(pluginDir, "a", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "a", `{
+		"name": "a",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "b"}]
+	}`)
+	writeExecutable(t, filepath.Join(pluginDir, "b", "run"), "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n")
+	writeManifest(t, pluginDir, "b", `{
+		"name": "b",
+		"version": "1.0.0",
+		"entry": "./run",
+		"enabled": true,
+		"dependencies": [{"name": "a"}]
+	}`)
+
+	pluginManager, err := Load(pluginDir, time.Second)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	statuses := pluginStatuses(pluginManager.Plugins())
+	if statuses["a"] != contract.StatusInvalid || statuses["b"] != contract.StatusInvalid {
+		t.Fatalf("expected cycle participants invalid, got %#v", statuses)
+	}
+	if len(pluginManager.EnabledPlugins()) != 0 {
+		t.Fatalf("expected no enabled plugins, got %#v", pluginManager.EnabledPlugins())
+	}
+}
+
+func pluginStatuses(plugins []Plugin) map[string]string {
+	statuses := make(map[string]string, len(plugins))
+	for _, plugin := range plugins {
+		statuses[plugin.Name] = plugin.Status
+	}
+	return statuses
+}
+
 func writeManifest(t *testing.T, root, name, body string) {
 	t.Helper()
 
