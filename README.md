@@ -20,10 +20,11 @@
 
 加分但非强制的能力：
 
-- 插件热加载或热刷新。
+- 插件热加载或热卸载。
 - 插件执行超时控制。
-- 插件隔离执行。
-- 插件之间的数据传递或上下文约束。
+- 插件进程隔离和资源隔离思路。
+- 插件依赖关系与版本约束。
+- 插件执行失败隔离与降级策略。
 - 支持非 Go 插件，只要遵守统一输入输出协议即可。
 
 ## 3. 关键技术选择
@@ -82,6 +83,7 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 │   ├── contract/
 │   │   └── types.go
 │   ├── manager/
+│   │   ├── dependencies.go
 │   │   ├── manager.go
 │   │   ├── manager_test.go
 │   │   └── manifest.go
@@ -89,6 +91,9 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 │       ├── process_runner.go
 │       └── process_runner_test.go
 └── plugins/
+    ├── python-echo/
+    │   ├── plugin.json
+    │   └── python_echo.py
     └── sample/
         ├── plugin.json
         └── sample-plugin
@@ -116,7 +121,18 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
   "version": "1.0.0",
   "entry": "./sample-plugin",
   "enabled": true,
-  "timeout_ms": 3000
+  "timeout_ms": 3000,
+  "dependencies": [
+    {
+      "name": "base",
+      "version": ">=1.0.0"
+    }
+  ],
+  "failure_policy": {
+    "fallback_data": {
+      "message": "fallback response"
+    }
+  }
 }
 ```
 
@@ -127,6 +143,8 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 - `entry`：插件可执行文件路径，相对于当前插件目录。
 - `enabled`：是否启用插件。
 - `timeout_ms`：插件执行超时时间，未设置时使用系统默认值。
+- `dependencies`：插件依赖列表。`version` 支持裸版本精确匹配，以及 `=`, `==`, `>`, `>=`, `<`, `<=`。
+- `failure_policy.fallback_data`：插件失败、超时或输出非法时返回的降级数据。
 
 ### 5.2 主程序传给插件的输入
 
@@ -215,6 +233,7 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 - `success`：最近一次执行成功。
 - `failed`：最近一次执行失败。
 - `timeout`：最近一次执行超时。
+- `degraded`：插件执行失败，但命中了 `failure_policy.fallback_data` 并返回降级数据。
 
 状态不会只依赖插件进程自身，而由主程序根据加载和执行结果维护。
 
@@ -231,6 +250,7 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 - 插件输出不是合法 JSON：记录协议错误，继续执行其他插件。
 - 插件超时：终止插件进程，记录 `timeout`。
 - 插件返回 `ok=false`：视为插件业务失败，但主程序继续运行。
+- 插件配置 `failure_policy.fallback_data` 时，失败结果会变成 `degraded`，同时保留原始错误信息并返回降级数据。
 
 ## 9. 实际运行命令
 
@@ -244,6 +264,18 @@ go build -o plugins/sample/sample-plugin ./cmd/sample-plugin
 
 ```bash
 go run ./cmd/executor list
+```
+
+重新扫描插件目录：
+
+```bash
+go run ./cmd/executor reload
+```
+
+从当前管理器结果中卸载插件：
+
+```bash
+go run ./cmd/executor unload --name sample
 ```
 
 从命令行传入 JSON 并执行所有启用插件：
@@ -268,6 +300,8 @@ go run ./cmd/executor run --plugins plugins --input '{"message":"hello"}'
 命令说明：
 
 - `list`：列出插件名称、版本、启用状态、加载状态。
+- `reload`：重新扫描插件目录并输出新的插件列表。长驻进程可直接复用 `manager.Reload()`。
+- `unload --name`：从当前管理器中移除指定插件。长驻进程可直接复用 `manager.Unload(name)`。
 - `run --input`：从命令行传入 JSON 数据并执行所有启用插件。
 - `run --file`：从 JSON 文件读取输入并执行所有启用插件。
 
@@ -299,6 +333,16 @@ go run ./cmd/executor run --plugins plugins --input '{"message":"hello"}'
 
 示例插件只用于验证协议和执行链路，不把业务逻辑写进主程序。
 
+仓库还包含一个默认禁用的 Python 示例插件：
+
+```text
+plugins/python-echo/
+├── plugin.json
+└── python_echo.py
+```
+
+启用方式是把 `plugins/python-echo/plugin.json` 里的 `enabled` 改成 `true`，并确保本机有 `python3`。这证明插件不必用 Go 编写，只要是可执行文件并遵守 stdin/stdout JSON 协议即可。
+
 ## 11. 验证方式
 
 运行单元测试和集成边界测试：
@@ -317,6 +361,9 @@ go test ./...
 - 插件输出非法 JSON 时，主程序返回清晰错误。
 - 插件超时时，主程序终止插件并汇总 timeout 状态。
 - `list` 命令能显示插件名称、版本和状态。
+- `reload` 和 `unload` 能完成运行时管理器刷新与卸载。
+- 依赖缺失、依赖版本不满足、依赖禁用和依赖循环都会被标记为 `invalid`。
+- 插件失败时可以通过 fallback 数据返回 `degraded` 结果。
 
 ## 12. 实现顺序
 
@@ -332,13 +379,20 @@ go test ./...
 8. 添加针对加载、执行、错误和超时的测试。
 9. 更新 README 中的实际运行命令和已知限制。
 
-## 13. 已知限制
+## 13. 进阶项完成情况
 
-当前版本聚焦题目必选能力，暂不包含以下内容：
+- 插件热加载/热卸载机制：已实现。`manager.Reload()` 会重新扫描插件目录，`manager.Unload(name)` 会从当前管理器中移除插件；CLI 提供 `reload` 和 `unload --name` 命令用于验证。
+- 插件执行超时控制：已实现。每个插件可通过 `timeout_ms` 配置超时，未配置时使用系统默认超时。超时会终止插件进程并汇总为 `timeout` 或 `degraded`。
+- 插件隔离方案：已实现进程隔离。每个插件以独立进程执行，通过 stdin/stdout 传递 JSON，插件 panic、异常退出、非零退出码和非法输出不会拖垮主程序。资源隔离思路是将 CPU/内存/文件系统/网络限制放在进程启动层扩展，例如后续接入系统级 sandbox、容器或 cgroup。
+- 插件依赖关系与版本约束：已实现。`dependencies` 支持依赖插件名和版本约束，加载阶段会校验缺失依赖、禁用依赖、版本不满足和循环依赖，执行顺序会保证依赖插件先执行。
+- 插件执行结果的失败隔离与降级策略：已实现。单个插件失败不会中断后续插件；插件可通过 `failure_policy.fallback_data` 声明降级数据，失败时返回 `degraded`。
+- 不同类型插件支持：已实现协议支持并提供 Go 与 Python 示例。任何语言只要能作为可执行文件读取 stdin JSON 并向 stdout 输出协议 JSON，都可以作为插件接入。
+
+## 14. 已知限制
 
 - 不支持常驻插件进程池。每次执行都会启动一次插件进程。
-- 不支持插件热加载守护进程。修改 `plugins/` 后需要重新执行命令。
-- 不支持插件之间的依赖编排或流水线传递。当前每个启用插件都收到同一份输入。
-- 不支持插件权限沙箱。插件以本机可执行文件方式运行，安全性依赖本地执行环境。
+- 不包含文件监听守护进程。热加载通过显式调用 `Reload()` 或 `reload` 命令完成。
+- 不支持插件之间传递上一个插件的输出。当前依赖只约束加载合法性和执行顺序，所有启用插件仍收到同一份输入。
+- 不内置 OS 级资源沙箱。当前隔离边界是独立进程、超时终止和协议边界，安全性仍依赖本地执行环境。
 - 不提交插件二进制产物。运行示例前需要先执行 `go build -o plugins/sample/sample-plugin ./cmd/sample-plugin`。
 - 测试中的临时插件脚本使用 shell，Windows 环境下相关测试会跳过。
