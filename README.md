@@ -1,119 +1,62 @@
-# 插件化执行系统设计与使用说明
+# 插件化执行系统设计说明
 
-## 1. 目标说明
+## 1. 整体架构设计说明
 
-本项目使用 Go 实现一个插件化执行系统。系统的核心目标是让主程序只负责输入、插件发现、插件管理、执行调度和结果汇总，不把具体业务处理逻辑写死在主程序里。
+### 1.1 架构边界
 
-题目要求强调“业务能力动态扩展”。因此本实现会把每个插件设计成可独立维护、独立构建、独立启停的执行单元，主程序通过统一协议调用插件。
+系统分两层：
 
-## 2. 题目要求拆解
+- 主程序：负责读取输入、扫描插件、校验清单、管理状态、调度执行、汇总结果
+- 插件：负责具体业务处理。插件不被主程序 import，只以独立可执行文件形式存在
 
-必须完成的能力：
+核心边界是 JSON 协议。主程序只认识插件清单和 stdin/stdout 数据格式，不认识插件内部代码
 
-- 定义统一插件接口或协议，包含插件名称、版本、运行入口。
-- 支持从指定目录加载插件，例如 `plugins/`。
-- 插件可以单独启用或禁用。
-- 插件执行异常不能导致主程序崩溃。
-- 主程序可以查看插件元信息，包括名称、版本和当前状态。
-- 主程序接收一份输入数据，将数据交给启用插件执行，并汇总插件执行结果。
-- README 需要说明整体架构、插件加载流程、关键实现选择，以及未完成部分或取舍。
+### 1.2 模块划分
 
-加分但非强制的能力：
-
-- 插件热加载或热卸载。
-- 插件执行超时控制。
-- 插件进程隔离和资源隔离思路。
-- 插件依赖关系与版本约束。
-- 插件执行失败隔离与降级策略。
-- 支持非 Go 插件，只要遵守统一输入输出协议即可。
-
-## 3. 关键技术选择
-
-### 3.1 不使用 Go 标准库 `plugin`
-
-Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
-
-- `plugin` 对平台有限制，在 macOS/Linux 上可用性较好，但 Windows 不支持。
-- 插件和主程序必须使用兼容的 Go 版本、依赖版本和构建参数，维护成本高。
-- 动态链接会让错误隔离变差，插件 panic 可能影响主进程稳定性。
-- 题目要求主程序不依赖具体插件实现，标准库 `plugin` 更像加载 Go 符号，不适合做语言无关的插件协议。
-
-### 3.2 不使用现成插件系统或流程编排框架
-
-题目约束不允许直接使用现成插件系统或流程编排框架。因此本项目会自己实现最小可用的插件发现、注册、状态管理和执行调度逻辑。
-
-### 3.3 插件采用独立进程模型
-
-本项目采用“插件目录 + 插件清单 + 独立可执行文件”的设计。
-
-主程序扫描 `plugins/` 目录，每个插件目录中包含一个 `plugin.json` 清单文件和一个可执行文件。主程序读取清单后注册插件，执行时启动对应插件进程，通过标准输入传入 JSON，通过标准输出读取 JSON 结果。
-
-这种设计的优点：
-
-- 主程序不需要 import 任何具体插件代码。
-- 插件崩溃、panic 或退出异常不会直接拖垮主程序。
-- 可以天然支持超时控制。
-- 插件可以用 Go 编写，也可以用 Python、Node.js 或其他语言编写，只要遵守协议。
-- 插件独立构建、独立维护，符合业务能力动态扩展的目标。
-
-代价：
-
-- 每次执行插件都要启动进程，性能不如内存内调用。
-- 插件和主程序之间只能通过协议传递可序列化数据。
-- 需要定义清晰的输入输出 JSON 格式。
-
-## 4. 总体架构
-
-当前目录结构：
-
-```text
-.
-├── .gitignore
-├── README.md
-├── go.mod
-├── cmd/
-│   ├── executor/
-│   │   ├── main.go
-│   │   └── main_test.go
-│   └── sample-plugin/
-│       └── main.go
-├── internal/
-│   ├── config/
-│   │   └── config.go
-│   ├── contract/
-│   │   └── types.go
-│   ├── manager/
-│   │   ├── dependencies.go
-│   │   ├── manager.go
-│   │   ├── manager_test.go
-│   │   └── manifest.go
-│   └── runner/
-│       ├── process_runner.go
-│       └── process_runner_test.go
-└── plugins/
-    ├── python-echo/
-    │   ├── plugin.json
-    │   └── python_echo.py
-    └── sample/
-        ├── plugin.json
-        └── sample-plugin
+```
+cmd/executor        CLI 入口：list、reload、unload、run
+cmd/sample-plugin   Go 示例插件
+internal/config     默认插件目录、默认超时
+internal/contract   主程序和插件共享协议类型
+internal/manager    插件扫描、清单校验、状态管理、依赖校验、reload/unload
+internal/runner     插件进程启动、超时控制、输出解析、失败降级
+plugins/            运行时插件目录
 ```
 
-模块职责：
+模块关系：
 
-- `cmd/executor`：主程序入口，负责读取命令行参数、加载插件、执行流程并输出结果。
-- `cmd/sample-plugin`：示例插件，用于证明插件协议可用。
-- `internal/contract`：主程序和插件共享的数据协议定义。
-- `internal/manager`：插件发现、注册、状态管理、启用禁用管理。
-- `internal/runner`：插件执行器，负责启动进程、传入输入、读取输出、处理超时和异常。
-- `internal/config`：系统配置，例如插件目录、超时时间。
-- `plugins/`：运行时插件目录，每个子目录代表一个插件。
+```
+executor -> manager -> plugin.json
+executor -> runner  -> plugin executable
+runner   -> contract -> request/response/result
+```
 
-## 5. 插件协议设计
+### 1.3 执行流程
 
-### 5.1 插件清单 `plugin.json`
+1. 主程序读取插件目录，默认 `plugins/`
+2. `manager` 扫描每个插件子目录
+3. 每个插件目录必须有 `plugin.json`
+4. 主程序校验名称、版本、入口文件、启用状态、依赖关系
+5. 合法且启用插件进入可执行列表；非法插件保留错误状态
+6. `runner` 按依赖顺序启动插件进程
+7. 主程序通过 stdin 写入请求 JSON
+8. 插件通过 stdout 返回响应 JSON
+9. 主程序解析结果，处理失败、超时、非法输出、fallback
+10. 主程序汇总所有插件结果
 
-每个插件目录必须包含 `plugin.json`：
+## 2. 插件系统核心设计思路
+
+### 2.1 插件单元
+
+插件 = 一个目录 + 一个清单 + 一个可执行入口。
+
+```text
+plugins/sample/
+├── plugin.json
+└── sample-plugin
+```
+
+`plugin.json` 描述插件元信息：
 
 ```json
 {
@@ -136,26 +79,25 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 }
 ```
 
-字段说明：
+字段含义：
 
-- `name`：插件名称，必须唯一。
-- `version`：插件版本，用于展示和排查问题。
-- `entry`：插件可执行文件路径，相对于当前插件目录。
-- `enabled`：是否启用插件。
-- `timeout_ms`：插件执行超时时间，未设置时使用系统默认值。
-- `dependencies`：插件依赖列表。`version` 支持裸版本精确匹配，以及 `=`, `==`, `>`, `>=`, `<`, `<=`。
-- `failure_policy.fallback_data`：插件失败、超时或输出非法时返回的降级数据。
+- `name`：插件唯一名
+- `version`：插件版本
+- `entry`：插件可执行文件，相对插件目录
+- `enabled`：是否启用
+- `timeout_ms`：单插件超时
+- `dependencies`：依赖插件名和版本约束
+- `failure_policy.fallback_data`：失败降级数据
 
-### 5.2 主程序传给插件的输入
+### 2.2 通信协议
 
-主程序通过插件进程的标准输入传入 JSON：
+主程序传给插件：
 
 ```json
 {
   "request_id": "req-001",
   "data": {
-    "message": "hello",
-    "value": 123
+    "message": "hello"
   },
   "context": {
     "source": "executor"
@@ -163,128 +105,157 @@ Go 标准库提供过 `plugin` 包，但本项目不采用它，原因如下：
 }
 ```
 
-字段说明：
-
-- `request_id`：一次执行请求的唯一标识。
-- `data`：业务输入数据，使用通用 JSON 对象承载。
-- `context`：上下文信息，供插件读取但不要求修改。
-
-### 5.3 插件返回给主程序的输出
-
-插件通过标准输出返回 JSON：
+插件返回给主程序：
 
 ```json
 {
   "ok": true,
   "data": {
-    "message": "hello from sample plugin"
+    "message": "hello from plugin"
   },
   "error": ""
 }
 ```
 
-字段说明：
+协议只要求 JSON，可执行文件语言不限。Go、Python、Node.js 都可接入，只要能读 stdin、写 stdout
 
-- `ok`：插件是否执行成功。
-- `data`：插件输出数据。
-- `error`：失败原因。成功时为空字符串。
+### 2.3 加载与状态管理
 
-## 6. 执行流程
+加载阶段做这些事：
 
-主程序执行流程：
+- 插件目录扫描。
+- `plugin.json` 读取和 JSON 解析
+- 插件名去重
+- 入口路径限制在插件目录内
+- 入口文件存在且可执行
+- 禁用插件标记为 `disabled`
+- 非法插件标记为 `invalid`，保留错误原因
+- 依赖缺失、禁用、版本不满足、循环依赖 -> `invalid`
 
-1. 读取配置，确定插件目录和默认超时时间。
-2. 扫描 `plugins/` 目录。
-3. 读取每个插件目录下的 `plugin.json`。
-4. 校验插件名称、版本、入口文件和启用状态。
-5. 注册合法插件，记录非法插件的错误状态。
-6. 接收一份输入数据。
-7. 按顺序执行所有启用插件。
-8. 每个插件独立进程执行，主程序设置超时。
-9. 捕获插件异常、超时、非 JSON 输出等错误。
-10. 汇总所有插件执行结果并输出。
+运行状态：
 
-结果汇总格式示例：
+- `enabled`：可执行
+- `disabled`：清单禁用
+- `invalid`：加载或依赖校验失败
+- `success`：执行成功
+- `failed`：执行失败
+- `timeout`：执行超时
+- `degraded`：执行失败但命中 fallback
 
-```json
-{
-  "request_id": "req-001",
-  "results": [
-    {
-      "plugin": "sample",
-      "version": "1.0.0",
-      "status": "success",
-      "data": {
-        "message": "hello from sample plugin"
-      },
-      "error": ""
-    }
-  ]
-}
-```
+`Reload()` 重新扫描插件目录。`Unload(name)` 从当前管理器中移除插件。CLI 暴露 `reload` 和 `unload --name` 方便验证
 
-## 7. 插件状态模型
+### 2.4 执行与失败隔离
 
-插件在主程序中会维护以下状态：
+每个插件独立进程执行。主程序不共享插件内存，不链接插件代码
 
-- `enabled`：插件清单中声明启用。
-- `disabled`：插件清单中声明禁用。
-- `invalid`：插件清单缺失、格式错误、入口不存在或名称冲突。
-- `success`：最近一次执行成功。
-- `failed`：最近一次执行失败。
-- `timeout`：最近一次执行超时。
-- `degraded`：插件执行失败，但命中了 `failure_policy.fallback_data` 并返回降级数据。
+失败处理：
 
-状态不会只依赖插件进程自身，而由主程序根据加载和执行结果维护。
+- 插件非零退出 -> `failed`
+- 插件 stdout 为空 -> `failed`
+- 插件 stdout 非 JSON -> `failed`
+- 插件返回 `ok=false` -> `failed`
+- 插件超时 -> `timeout`，进程被终止
+- 配置 fallback -> 状态改为 `degraded`，返回 `fallback_data`，同时保留原始错误
 
-## 8. 错误处理策略
+单个插件失败不影响后续插件执行
 
-主程序必须保证单个插件失败不会影响整体执行。
+## 3. 关键实现选择与取舍说明
 
-已处理的错误类型：
+### 3.1 为什么不用 Go 标准库 `plugin`
 
-- 插件目录不存在：主程序正常启动，插件列表为空。
-- `plugin.json` 缺失或格式错误：该插件标记为 `invalid`。
-- 插件入口不存在或不可执行：该插件标记为 `invalid`。
-- 插件执行返回非零退出码：记录错误，继续执行其他插件。
-- 插件输出不是合法 JSON：记录协议错误，继续执行其他插件。
-- 插件超时：终止插件进程，记录 `timeout`。
-- 插件返回 `ok=false`：视为插件业务失败，但主程序继续运行。
-- 插件配置 `failure_policy.fallback_data` 时，失败结果会变成 `degraded`，同时保留原始错误信息并返回降级数据。
+不用 `plugin` 包。原因：
 
-## 9. 实际运行命令
+- 平台限制明显，Windows 不支持
+- 主程序和插件必须 Go 版本、依赖、构建参数兼容
+- 插件 panic 更容易影响主进程
+- 只能加载 Go 符号，不适合跨语言插件协议
 
-先构建示例插件。生成的二进制会放到 `plugins/sample/sample-plugin`，该文件已被 `.gitignore` 忽略，不提交到仓库。
+当前选择独立进程模型。结果：
+
+- 稳定性更好：插件崩溃不拖垮主程序
+- 扩展性更好：任意语言可接入
+- 部署更简单：插件独立构建、独立替换
+- 代价：每次执行要启动进程，性能低于内存调用
+
+### 3.2 为什么不用现成插件框架
+
+题目要求主程序不依赖现成插件系统或流程编排框架。实现只用 Go 标准库完成：
+
+- `os.ReadDir` / `os.ReadFile`：扫描和读取清单
+- `encoding/json`：协议序列化
+- `os/exec`：启动插件进程
+- `context.WithTimeout`：控制超时
+- `flag`：处理 CLI 参数
+
+而且任务非常简单,用这些框架反而是大炮打蚊子了
+
+### 3.3 依赖与执行顺序取舍
+
+依赖只做加载合法性和执行顺序约束：
+
+- 依赖插件必须存在
+- 依赖插件必须启用且合法
+- 版本约束支持 `=`, `==`, `>`, `>=`, `<`, `<=`
+- 循环依赖直接标记非法
+- 执行时依赖插件先运行
+
+不做插件间数据流水线。所有插件收到同一份输入。原因：题目重点是插件化执行系统，不是工作流编排系统。这样设计更小、更稳、更容易验证
+
+### 3.4 安全与资源隔离取舍
+
+当前隔离边界是进程边界 + JSON 协议 + 超时终止
+
+已做：
+
+- 插件入口必须是相对路径
+- 入口路径不能逃出插件目录
+- 入口文件必须存在且可执行
+- 单插件有超时
+- 非法输出不会污染主程序
+
+未做：
+
+- OS 级文件系统沙箱
+- CPU / 内存限额
+- 网络权限控制
+- 常驻插件进程池
+- 文件监听式热加载
+
+原因：这些属于运行环境治理，不是核心插件协议。后续可在 `runner` 进程启动层接入 sandbox、容器、cgroup 或权限配置，不需要改插件协议
+
+## 4. 如何运行
+
+### 4.1 构建示例插件
+
+先生成 Go 示例插件可执行文件：
 
 ```bash
 go build -o plugins/sample/sample-plugin ./cmd/sample-plugin
 ```
 
-查看插件列表：
+`plugins/python-echo` 是 Python 示例插件，默认禁用。需要验证跨语言插件时，把它的 `plugin.json` 里 `enabled` 改成 `true`，并确保本机有 `python3`。
+
+### 4.2 查看和管理插件
 
 ```bash
 go run ./cmd/executor list
-```
-
-重新扫描插件目录：
-
-```bash
 go run ./cmd/executor reload
-```
-
-从当前管理器结果中卸载插件：
-
-```bash
 go run ./cmd/executor unload --name sample
 ```
 
-从命令行传入 JSON 并执行所有启用插件：
+- `list`：查看插件名称、版本、启用状态、加载状态
+- `reload`：重新扫描插件目录
+- `unload --name`：从当前管理器结果中移除插件
+
+### 4.3 执行插件
+
+直接传 JSON：
 
 ```bash
-go run ./cmd/executor run --input '{"message":"hello","value":123}'
+go run ./cmd/executor run --input '{"message":"hello"}'
 ```
 
-从文件读取 JSON 并执行所有启用插件：
+从文件读取 JSON：
 
 ```bash
 go run ./cmd/executor run --file input.json
@@ -293,106 +264,12 @@ go run ./cmd/executor run --file input.json
 指定插件目录：
 
 ```bash
-go run ./cmd/executor list --plugins plugins
 go run ./cmd/executor run --plugins plugins --input '{"message":"hello"}'
 ```
 
-命令说明：
-
-- `list`：列出插件名称、版本、启用状态、加载状态。
-- `reload`：重新扫描插件目录并输出新的插件列表。长驻进程可直接复用 `manager.Reload()`。
-- `unload --name`：从当前管理器中移除指定插件。长驻进程可直接复用 `manager.Unload(name)`。
-- `run --input`：从命令行传入 JSON 数据并执行所有启用插件。
-- `run --file`：从 JSON 文件读取输入并执行所有启用插件。
-
-为了控制实现范围，第一版先不引入第三方 CLI 框架，使用 Go 标准库 `flag` 和简单参数解析完成。
-
-## 10. 示例插件设计
-
-示例插件使用 Go 编写，功能保持简单：读取输入中的 `message` 字段，返回一段增强后的消息。
-
-示例输入：
-
-```json
-{
-  "message": "hello"
-}
-```
-
-示例输出：
-
-```json
-{
-  "ok": true,
-  "data": {
-    "message": "hello from sample plugin"
-  },
-  "error": ""
-}
-```
-
-示例插件只用于验证协议和执行链路，不把业务逻辑写进主程序。
-
-仓库还包含一个默认禁用的 Python 示例插件：
-
-```text
-plugins/python-echo/
-├── plugin.json
-└── python_echo.py
-```
-
-启用方式是把 `plugins/python-echo/plugin.json` 里的 `enabled` 改成 `true`，并确保本机有 `python3`。这证明插件不必用 Go 编写，只要是可执行文件并遵守 stdin/stdout JSON 协议即可。
-
-## 11. 验证方式
-
-运行单元测试和集成边界测试：
+### 4.4 验证
 
 ```bash
 go test ./...
+golangci-lint run
 ```
-
-已覆盖：
-
-- `go test ./...` 能通过。
-- 插件目录为空时，主程序能正常运行。
-- 合法插件可以被发现并执行。
-- 禁用插件不会被执行。
-- 插件返回错误时，主程序继续执行。
-- 插件输出非法 JSON 时，主程序返回清晰错误。
-- 插件超时时，主程序终止插件并汇总 timeout 状态。
-- `list` 命令能显示插件名称、版本和状态。
-- `reload` 和 `unload` 能完成运行时管理器刷新与卸载。
-- 依赖缺失、依赖版本不满足、依赖禁用和依赖循环都会被标记为 `invalid`。
-- 插件失败时可以通过 fallback 数据返回 `degraded` 结果。
-
-## 12. 实现顺序
-
-已按以下顺序实现并提交，保证每一步都可验证：
-
-1. 初始化 Go 模块。
-2. 定义 `contract` 数据结构。
-3. 实现插件清单读取和校验。
-4. 实现插件管理器和 `list` 命令。
-5. 实现进程执行器。
-6. 实现 `run --input` 和 `run --file`。
-7. 添加示例插件。
-8. 添加针对加载、执行、错误和超时的测试。
-9. 更新 README 中的实际运行命令和已知限制。
-
-## 13. 进阶项完成情况
-
-- 插件热加载/热卸载机制：已实现。`manager.Reload()` 会重新扫描插件目录，`manager.Unload(name)` 会从当前管理器中移除插件；CLI 提供 `reload` 和 `unload --name` 命令用于验证。
-- 插件执行超时控制：已实现。每个插件可通过 `timeout_ms` 配置超时，未配置时使用系统默认超时。超时会终止插件进程并汇总为 `timeout` 或 `degraded`。
-- 插件隔离方案：已实现进程隔离。每个插件以独立进程执行，通过 stdin/stdout 传递 JSON，插件 panic、异常退出、非零退出码和非法输出不会拖垮主程序。资源隔离思路是将 CPU/内存/文件系统/网络限制放在进程启动层扩展，例如后续接入系统级 sandbox、容器或 cgroup。
-- 插件依赖关系与版本约束：已实现。`dependencies` 支持依赖插件名和版本约束，加载阶段会校验缺失依赖、禁用依赖、版本不满足和循环依赖，执行顺序会保证依赖插件先执行。
-- 插件执行结果的失败隔离与降级策略：已实现。单个插件失败不会中断后续插件；插件可通过 `failure_policy.fallback_data` 声明降级数据，失败时返回 `degraded`。
-- 不同类型插件支持：已实现协议支持并提供 Go 与 Python 示例。任何语言只要能作为可执行文件读取 stdin JSON 并向 stdout 输出协议 JSON，都可以作为插件接入。
-
-## 14. 已知限制
-
-- 不支持常驻插件进程池。每次执行都会启动一次插件进程。
-- 不包含文件监听守护进程。热加载通过显式调用 `Reload()` 或 `reload` 命令完成。
-- 不支持插件之间传递上一个插件的输出。当前依赖只约束加载合法性和执行顺序，所有启用插件仍收到同一份输入。
-- 不内置 OS 级资源沙箱。当前隔离边界是独立进程、超时终止和协议边界，安全性仍依赖本地执行环境。
-- 不提交插件二进制产物。运行示例前需要先执行 `go build -o plugins/sample/sample-plugin ./cmd/sample-plugin`。
-- 测试中的临时插件脚本使用 shell，Windows 环境下相关测试会跳过。
